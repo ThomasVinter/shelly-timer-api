@@ -18,8 +18,10 @@ def hent_data_fra_stromligning(lat, lon):
         headers = {"User-Agent": "ShellyController/1.0"}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
+        print("Svar fra stromligning.dk:", response.text)  # 🔍 debug-output
         return response.json()
     except Exception as e:
+        print("Fejl ved hentning af data:", str(e))  # 🔍 fejl-debug
         return {"error": str(e)}
 
 def beregn_timer(data, antal_timer, inverted):

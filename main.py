@@ -20,13 +20,18 @@ from datetime import datetime
 
 def hent_data_fra_stromligning():
     try:
-        # Midlertidig fast URL til test – virker ifølge dokumentation
-        test_url = "https://www.stromligning.dk/api/Prices?supplier=dinel_c&date=2025-04-14"
+        url = (
+            "https://www.stromligning.dk/api/Prices"
+            "?supplier=dinel_c"
+            "&lat=56.05065"
+            "&lon=10.250527"
+            "&date=2025-04-14"
+        )
         headers = {
             "User-Agent": "ShellyController/1.0",
             "Accept": "application/json"
         }
-        response = requests.get(test_url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         logging.info("Svar fra test-URL: %s", response.text)
         return response.json()
@@ -34,6 +39,7 @@ def hent_data_fra_stromligning():
     except Exception as e:
         logging.error("Fejl ved test-URL: %s", str(e))
         return {"error": f"HTTP-fejl: {str(e)}"}
+
         
 
 def beregn_timer(data, antal_timer, inverted):

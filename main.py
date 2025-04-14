@@ -1,94 +1,65 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from flask import Flask, jsonify
 import requests
 from datetime import datetime, timedelta
-import os
-import uvicorn
+import pytz
 
-app = FastAPI()
+app = Flask(__name__)
 
-# Indstillinger
-NUM_HOURS_ON = 6
-INVERT_OUTPUT = False  # Hvis True: vælg de DYRESTE timer
-LAT = 56.05065
-LON = 10.250527
-SUPPLIER = "dinel_c"
+# Tidszoner
+utc = pytz.utc
+dk_tz = pytz.timezone("Europe/Copenhagen")
 
-def get_price_data_for_tomorrow():
-    tomorrow = datetime.utcnow().date() + timedelta(days=1)
-    date_str = tomorrow.isoformat()
+# Antal ønskede billigste timer pr. dag
+CHEAPEST_HOURS = 6
+INVERT_SELECTION = False  # Sæt til True hvis du vil vælge de dyreste i stedet
 
-    url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER}&priceArea=DK1&date={date_str}"
-    print("Henter data fra:", url)
+def get_prices_for_day(date_str):
+    url = f"https://stromligning.dk/api/Prices?priceArea=DK1&supplier=dinel_c&date={date_str}"
+    response = requests.get(url)
+    data = response.json()
 
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
+    prices = []
+    for entry in data:
+        # Konverter UTC ISO-timestamp til lokal dansk tid (automatisk med sommer/vintertid)
+        timestamp_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
+        timestamp_local = timestamp_utc.astimezone(dk_tz)
 
-        if not data.get("prices"):
-            return {"error": "Ikke nok prisdata"}
+        prices.append({
+            "timestamp_utc": timestamp_utc,
+            "timestamp_local": timestamp_local,
+            "total_price": entry["price"]["total"]
+        })
 
-        return data["prices"]
+    return prices
 
-    except requests.RequestException as e:
-        return {"error": f"HTTP-fejl: {e}"}
-    except Exception as e:
-        return {"error": f"Ukendt fejl: {e}"}
+def get_cheapest_hours(prices, hours=6, invert=False):
+    sorted_prices = sorted(prices, key=lambda p: p["total_price"], reverse=invert)
+    selected = sorted(sorted_prices[:hours], key=lambda p: p["timestamp_local"].hour)
+    return selected
 
-def get_cheapest_hours(prices, num_hours, invert=False):
-    try:
-        hour_prices = []
+@app.route("/")
+def get_today_schedule():
+    now = datetime.now(dk_tz)
+    
+    # Brug morgendagens dato, hvis klokken er efter 14:00 (priser for i morgen er først tilgængelige derefter)
+    if now.hour >= 14:
+        target_date = now + timedelta(days=1)
+    else:
+        target_date = now
 
-        for entry in prices:
-            hour = datetime.fromisoformat(entry["date"]).hour
-            price = entry["price"]["total"]
-            hour_prices.append({"hour": hour, "price": price})
+    date_str = target_date.strftime("%Y-%m-%d")
+    prices = get_prices_for_day(date_str)
+    cheapest = get_cheapest_hours(prices, hours=CHEAPEST_HOURS, invert=INVERT_SELECTION)
 
-        sorted_hours = sorted(hour_prices, key=lambda x: x["price"], reverse=invert)
-        selected = sorted_hours[:num_hours]
+    result = []
+    for entry in cheapest:
+        hour = entry["timestamp_local"].hour
+        result.append(hour)
 
-        selected_hours = [item["hour"] for item in selected]
+    return jsonify({
+        "date": date_str,
+        "selected_hours": result
+    })
 
-        result = []
-        for hour in range(24):
-            result.append({
-                "hour": hour,
-                "on": hour in selected_hours
-            })
-
-        return result
-
-    except Exception as e:
-        return {"error": f"Fejl ved sortering: {e}"}
-
-@app.get("/")
-def read_root():
-    prices = get_price_data_for_tomorrow()
-    if isinstance(prices, dict) and "error" in prices:
-        print("Fejl under hentning af priser:", prices["error"])
-        return JSONResponse(status_code=500, content=prices)
-
-    print("Antal prisintervaller hentet:", len(prices))
-    result = get_cheapest_hours(prices, NUM_HOURS_ON, INVERT_OUTPUT)
-
-    if isinstance(result, dict) and "error" in result:
-        print("Fejl i prisbehandling:", result["error"])
-        return JSONResponse(status_code=500, content=result)
-
-    print("Resultat fra prisdata:", result)
-    return result
-
-@app.get("/raw-prices")
-def get_raw_prices():
-    prices = get_price_data_for_tomorrow()
-    if isinstance(prices, dict) and "error" in prices:
-        return JSONResponse(status_code=500, content=prices)
-
-    return prices  # Returnér rå data fra API'et uden sortering
-
-
-# Starter server (Render kræver dette)
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)

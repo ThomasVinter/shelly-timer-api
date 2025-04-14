@@ -20,27 +20,28 @@ from datetime import datetime
 
 def hent_data_fra_stromligning():
     try:
+        supplier = "dinel_c"
+        price_area = "DK1"
+        today = datetime.now().strftime("%Y-%m-%d")
+
         url = (
-            "https://www.stromligning.dk/api/Prices"
-            "?supplier=dinel_c"
-            "&lat=56.05065"
-            "&lon=10.250527"
-            "&date=2025-04-14"
+            f"https://stromligning.dk/api/Prices"
+            f"?supplier={supplier}&priceArea={price_area}&date={today}"
         )
+
         headers = {
             "User-Agent": "ShellyController/1.0",
             "Accept": "application/json"
         }
+
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
-        logging.info("Svar fra test-URL: %s", response.text)
+        logging.info("Svar fra stromligning.dk: %s", response.text)
         return response.json()
-
     except Exception as e:
-        logging.error("Fejl ved test-URL: %s", str(e))
+        logging.error("Fejl ved hentning af data: %s", str(e))
         return {"error": f"HTTP-fejl: {str(e)}"}
-
-        
+      
 
 def beregn_timer(data, antal_timer, inverted):
     try:

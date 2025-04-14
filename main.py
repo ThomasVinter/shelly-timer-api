@@ -1,6 +1,6 @@
 from flask import Flask, jsonify
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 app = Flask(__name__)
@@ -18,12 +18,16 @@ def get_prices_for_day(date_str):
 
     prices = []
     for entry in data:
-        # Konverter UTC til dansk tid
-        timestamp_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
-        timestamp_dk = timestamp_utc.astimezone(DK_TIMEZONE)
-
-        total_price = entry["price"]["total"]  # kr/kWh inkl. moms og afgifter
-        prices.append((timestamp_dk, total_price))
+        if isinstance(entry, dict) and "date" in entry and "price" in entry and "total" in entry["price"]:
+            # Konverter UTC til dansk tid
+            try:
+                timestamp_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
+                timestamp_dk = timestamp_utc.astimezone(DK_TIMEZONE)
+                total_price = entry["price"]["total"]
+                prices.append((timestamp_dk, total_price))
+            except Exception as e:
+                print(f"Fejl ved parsing af entry: {e}")
+                continue
 
     return prices
 
@@ -31,7 +35,7 @@ def get_prices_for_day(date_str):
 def get_today_schedule():
     now_dk = datetime.now(DK_TIMEZONE)
     today = now_dk.date()
-    
+
     # Hvis klokken er efter 14 dansk tid, brug næste dags data
     if now_dk.hour >= 14:
         target_date = today + timedelta(days=1)
@@ -40,6 +44,9 @@ def get_today_schedule():
 
     date_str = target_date.strftime("%Y-%m-%d")
     prices = get_prices_for_day(date_str)
+
+    if not prices:
+        return jsonify({"error": "Ingen prisdata tilgængelig"}), 500
 
     # Find de 6 billigste timer
     sorted_prices = sorted(prices, key=lambda x: x[1])

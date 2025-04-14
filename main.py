@@ -7,18 +7,16 @@ import logging
 app = FastAPI()
 
 # Konfiguration
-LAT = 56.05065
-LON = 10.250527
 CHEAPEST_HOURS = 6
 INVERTED = False
+SUPPLIER = "dinel_c"
 
 logging.basicConfig(level=logging.INFO)
 
 def hent_data_fra_stromligning():
     try:
-        supplier = "dinel_c"
         today = datetime.now().strftime("%Y-%m-%d")
-        url = f"https://stromligning.dk/api/Prices?supplier={supplier}&lat={LAT}&lon={LON}&date={today}"
+        url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER}&date={today}"
         headers = {
             "User-Agent": "ShellyController/1.0",
             "Accept": "application/json"
@@ -36,12 +34,12 @@ def beregn_timer(data, antal_timer, inverted):
         priser = []
         for entry in data.get("prices", []):
             dt_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
-            dt_local = dt_utc + timedelta(hours=2)  # Dansk sommertid (UTC+2)
+            dt_local = dt_utc + timedelta(hours=2)  # Dansk sommertid
             hour = dt_local.hour
             total = entry["price"]["total"]
             priser.append({"hour": hour, "total": total})
 
-            # DEBUG: Udskriv tidspunkt og pris
+            # DEBUG output
             logging.info(f"Time (lokal): {dt_local.strftime('%Y-%m-%d %H:%M')} - Totalpris: {total:.3f} kr")
 
         if len(priser) < antal_timer:

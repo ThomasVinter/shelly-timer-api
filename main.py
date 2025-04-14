@@ -2,81 +2,71 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import requests
 from datetime import datetime, timedelta
-import logging
-import os
+import uvicorn
 
 app = FastAPI()
 
-# Konfiguration
-SUPPLIER_ID = "dinel_c"
-CHEAPEST_HOURS = 6
-INVERTED = False
+LAT = 56.05065
+LON = 10.250527
+ANTAL_TIMER_TAENDT = 6
+INVERTERET = False  # False = tænd de billigste timer, True = sluk de dyreste
 
-logging.basicConfig(level=logging.INFO)
-
-def hent_data_fra_stromligning():
+def hent_leverandoer():
     try:
-        # Brug i morgen som mål
-        i_dag = datetime.now()
-        i_morgen = i_dag + timedelta(days=1)
-        dato = i_morgen.strftime("%Y-%m-%d")
-
-        url = (
-            f"https://stromligning.dk/api/Prices"
-            f"?supplier={SUPPLIER_ID}&date={dato}"
-        )
-
-        headers = {
-            "User-Agent": "ShellyController/1.0",
-            "Accept": "application/json"
-        }
-
-        response = requests.get(url, headers=headers, timeout=10)
+        url = f"https://stromligning.dk/api/suppliers/find?lat={LAT}&long={LON}"
+        response = requests.get(url)
         response.raise_for_status()
-
-        logging.info("Svar fra API: %s", response.text)
-        return response.json()
+        data = response.json()
+        return data[0]["id"]
     except Exception as e:
-        logging.error("Fejl i hent_data_fra_stromligning: %s", str(e))
-        return {"error": f"HTTP-fejl: {str(e)}"}
+        raise RuntimeError(f"Kunne ikke finde leverandør: {e}")
 
-def beregn_timer(data, antal_timer, inverted):
+def hent_priser(supplier_id):
     try:
-        priser = []
-        for entry in data.get("prices", []):
-            hour = datetime.fromisoformat(entry["date"]).hour
-            priser.append({
-                "hour": hour,
-                "total": entry["price"]["total"]
-            })
+        i_dag = datetime.now()
+        hvis_klokken_efter_14 = i_dag.hour >= 14
+        dato = (i_dag + timedelta(days=1)) if hvis_klokken_efter_14 else i_dag
+        dato_str = dato.strftime("%Y-%m-%d")
 
-        if not priser or len(priser) < 24:
-            return {"error": "Ikke nok prisdata"}
+        url = f"https://stromligning.dk/api/Prices?supplier={supplier_id}&date={dato_str}"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
 
-        sorteret = sorted(priser, key=lambda x: x["total"])
-        billigste_timer = [entry["hour"] for entry in sorteret[:antal_timer]]
+        priser = data.get("prices", [])
+        if len(priser) < 24:
+            raise ValueError("Ikke nok prisdata")
 
-        result = [{"hour": h, "on": not inverted} for h in billigste_timer]
-        result += [{"hour": h, "on": inverted} for h in range(24) if h not in billigste_timer]
-        return sorted(result, key=lambda x: x["hour"])
-
+        return priser
     except Exception as e:
-        logging.error("Fejl i beregn_timer: %s", str(e))
-        return {"error": str(e)}
+        raise RuntimeError(f"HTTP-fejl: {e}")
 
-@app.get("/tider")
-def get_tider():
+def beregn_timer(priser):
+    # Lav en liste med (hour, total_price)
+    timesliste = []
+    for entry in priser:
+        dt = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
+        hour = dt.hour
+        total = entry["price"]["total"]
+        timesliste.append((hour, total))
+
+    # Sortér efter pris (lav til høj eller høj til lav afhængigt af INVERTERET)
+    sorteret = sorted(timesliste, key=lambda x: x[1], reverse=INVERTERET)
+
+    valgte_timer = set(hour for hour, _ in sorteret[:ANTAL_TIMER_TAENDT])
+
+    resultat = [{"hour": hour, "on": hour in valgte_timer} for hour in range(24)]
+    return resultat
+
+@app.get("/")
+def get_timer():
     try:
-        data = hent_data_fra_stromligning()
-        if "error" in data:
-            return JSONResponse(content=data, status_code=500)
-        result = beregn_timer(data, CHEAPEST_HOURS, INVERTED)
-        return result
+        supplier_id = hent_leverandoer()
+        priser = hent_priser(supplier_id)
+        timer = beregn_timer(priser)
+        return JSONResponse(content=timer)
     except Exception as e:
-        logging.error("Fejl i get_tider: %s", str(e))
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse(content={"error": str(e)})
 
 if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=10000)

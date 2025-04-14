@@ -32,17 +32,21 @@ def hent_priser_fra_stromligning(dato: str):
 
 def beregn_timer(data, antal_timer, inverted):
     try:
+        nu = datetime.utcnow()
         priser = []
+
         for entry in data.get("prices", []):
             dt = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
-            hour = dt.hour
-            priser.append({
-                "hour": hour,
-                "total": entry["price"]["total"]
-            })
+            if dt >= nu:
+                priser.append({
+                    "hour": dt.hour,
+                    "total": entry["price"]["total"]
+                })
+            if len(priser) == 24:
+                break  # Max 24 timer frem
 
-        if len(priser) < 24:
-            return {"error": "Ikke nok prisdata"}
+        if len(priser) < antal_timer:
+            return {"error": f"Kun {len(priser)} fremtidige timer tilgængelige"}
 
         sorteret = sorted(priser, key=lambda x: x["total"])
         billigste_timer = [entry["hour"] for entry in sorteret[:antal_timer]]
@@ -53,6 +57,7 @@ def beregn_timer(data, antal_timer, inverted):
     except Exception as e:
         logging.error("Fejl i beregning: %s", str(e))
         return {"error": str(e)}
+
 
 @app.get("/tider")
 def get_tider():

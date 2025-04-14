@@ -2,71 +2,82 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import requests
 from datetime import datetime, timedelta
-import os
 
 app = FastAPI()
 
-# KONFIGURATION – juster manuelt
-LAT = 56.05065
-LON = 10.250527
-SUPPLIER_ID = "dinel_c"
-NUM_HOURS_ON = 6  # antal billigste timer hvor varmepumpen skal være TÆNDT
-INVERT_OUTPUT = False  # hvis True, inverteres så den er SLUKKET de billigste timer
+# Konfiguration: vælg antal timer varmepumpen skal være TÆNDT
+NUM_HOURS_ON = 6
+INVERT_OUTPUT = False  # Hvis True: vælg de dyreste timer i stedet
 
 def get_price_data_for_tomorrow():
-    tomorrow = (datetime.utcnow() + timedelta(days=1)).date()
-    url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER_ID}&lat={LAT}&lon={LON}&date={tomorrow}"
-    print(f"Henter data fra: {url}")  # DEBUG
+    tomorrow = datetime.utcnow().date() + timedelta(days=1)
+    date_str = tomorrow.isoformat()
+
+    url = f"https://stromligning.dk/api/Prices?supplier=dinel_c&date={date_str}"
+    print("Henter data fra:", url)
+
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        print(f"Data modtaget: {data}")  # DEBUG
-        return data.get("prices", [])
-    except Exception as e:
-        print(f"Fejl under hentning af priser: {e}")  # DEBUG
+
+        if not data.get("prices"):
+            return {"error": "Ikke nok prisdata"}
+
+        return data["prices"]
+
+    except requests.RequestException as e:
         return {"error": f"HTTP-fejl: {e}"}
+    except Exception as e:
+        return {"error": f"Ukendt fejl: {e}"}
 
+def get_cheapest_hours(prices, num_hours, invert=False):
+    try:
+        hour_prices = []
 
-def get_cheapest_hours(prices, num_hours, invert):
-    hourly_prices = []
+        for entry in prices:
+            hour = datetime.fromisoformat(entry["date"]).hour
+            price = entry["price"]["total"]
+            hour_prices.append({"hour": hour, "price": price})
 
-    for entry in prices:
-        timestamp = entry["date"]
-        hour = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).hour
-        total_price = entry["price"]["total"]
-        hourly_prices.append((hour, total_price))
+        sorted_hours = sorted(hour_prices, key=lambda x: x["price"], reverse=invert)
+        selected = sorted_hours[:num_hours]
 
-    if len(hourly_prices) < 24:
-        return {"error": "Ikke nok prisdata"}
+        selected_hours = [item["hour"] for item in selected]
 
-    # Sorter timer efter pris
-    sorted_by_price = sorted(hourly_prices, key=lambda x: x[1])
-    cheapest_hours = set(hour for hour, _ in sorted_by_price[:num_hours])
+        result = []
+        for hour in range(24):
+            result.append({
+                "hour": hour,
+                "on": hour in selected_hours
+            })
 
-    result = []
-    for hour in range(24):
-        is_on = (hour in cheapest_hours)
-        result.append({"hour": hour, "on": not is_on if invert else is_on})
+        return result
 
-    return result
+    except Exception as e:
+        return {"error": f"Fejl ved sortering: {e}"}
 
 @app.get("/")
 def read_root():
     prices = get_price_data_for_tomorrow()
-    print("Resultat fra prisdata:", prices)  # DEBUG
-
     if isinstance(prices, dict) and "error" in prices:
+        print("Fejl under hentning af priser:", prices["error"])
         return JSONResponse(status_code=500, content=prices)
 
+    print("Antal prisintervaller hentet:", len(prices))
     result = get_cheapest_hours(prices, NUM_HOURS_ON, INVERT_OUTPUT)
+
     if isinstance(result, dict) and "error" in result:
+        print("Fejl i prisbehandling:", result["error"])
         return JSONResponse(status_code=500, content=result)
 
+    print("Resultat fra prisdata:", result)
     return result
 
-# --- Render kræver denne del for at finde porten ---
+# 👇 Denne del er kun nødvendig hvis du vil sikre port-detektion
+import os
+import uvicorn
+
 if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)

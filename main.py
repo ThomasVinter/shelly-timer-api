@@ -1,40 +1,24 @@
-from fastapi import FastAPI
+ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import requests
 import logging
 import os
+from datetime import datetime
 
 app = FastAPI()
 
-# Konfiguration (du kan ændre disse direkte i koden)
+# Konfiguration
 LAT = 56.05065
 LON = 10.250527
+SUPPLIER_ID = "dinel_c"
 CHEAPEST_HOURS = 6
 INVERTED = False
 
 logging.basicConfig(level=logging.INFO)
 
-def hent_leverandoer(lat, lon):
+def hent_data_fra_stromligning():
     try:
-        url = f"https://stromligning.dk/api/suppliers/find?lat={lat}&long={lon}"
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        supplier = response.json()
-        if not supplier:
-            raise ValueError("Ingen leverandør fundet")
-        navn = supplier[0]["Name"]
-        logging.info("Fundet leverandør: %s", navn)
-        return navn
-    except Exception as e:
-        logging.error("Fejl ved hentning af leverandør: %s", str(e))
-        return None
-
-def hent_data_fra_stromligning(lat, lon):
-    try:
-        supplier = hent_leverandoer(lat, lon)
-        if not supplier:
-            return {"error": "Ingen leverandør fundet"}
-        url = f"https://stromligning.dk/api/Prices?supplier={supplier}&lat={lat}&lon={lon}"
+        url = f"https://www.stromligning.dk/api/Prices?supplier={SUPPLIER_ID}&lat={LAT}&lon={LON}"
         headers = {
             "User-Agent": "ShellyController/1.0",
             "Accept": "application/json"
@@ -44,7 +28,7 @@ def hent_data_fra_stromligning(lat, lon):
         logging.info("Svar fra stromligning.dk: %s", response.text)
         return response.json()
     except Exception as e:
-        logging.error("HTTP-fejl: %s", str(e))
+        logging.error("Fejl ved hentning af data: %s", str(e))
         return {"error": f"HTTP-fejl: {str(e)}"}
 
 def beregn_timer(data, antal_timer, inverted):
@@ -71,12 +55,15 @@ def beregn_timer(data, antal_timer, inverted):
 @app.get("/tider")
 def get_tider():
     try:
-        data = hent_data_fra_stromligning(LAT, LON)
+        data = hent_data_fra_stromligning()
         if "error" in data:
             return JSONResponse(content=data, status_code=500)
+        logging.info("Data modtaget: %s", data)
         result = beregn_timer(data, CHEAPEST_HOURS, INVERTED)
+        logging.info("Timer beregnet: %s", result)
         return result
     except Exception as e:
+        logging.error("Fejl i get_tider: %s", str(e))
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 if __name__ == "__main__":

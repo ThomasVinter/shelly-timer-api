@@ -14,17 +14,19 @@ NUM_HOURS_ON = 6  # antal billigste timer hvor varmepumpen skal være TÆNDT
 INVERT_OUTPUT = False  # hvis True, inverteres så den er SLUKKET de billigste timer
 
 def get_price_data_for_tomorrow():
-    # Dato for i morgen
     tomorrow = (datetime.utcnow() + timedelta(days=1)).date()
     url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER_ID}&lat={LAT}&lon={LON}&date={tomorrow}"
-
+    print(f"Henter data fra: {url}")  # DEBUG
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
+        print(f"Data modtaget: {data}")  # DEBUG
         return data.get("prices", [])
     except Exception as e:
+        print(f"Fejl under hentning af priser: {e}")  # DEBUG
         return {"error": f"HTTP-fejl: {e}"}
+
 
 def get_cheapest_hours(prices, num_hours, invert):
     hourly_prices = []
@@ -52,6 +54,8 @@ def get_cheapest_hours(prices, num_hours, invert):
 @app.get("/")
 def read_root():
     prices = get_price_data_for_tomorrow()
+    print("Resultat fra prisdata:", prices)  # DEBUG
+
     if isinstance(prices, dict) and "error" in prices:
         return JSONResponse(status_code=500, content=prices)
 

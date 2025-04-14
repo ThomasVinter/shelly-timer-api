@@ -1,86 +1,85 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import requests
-from datetime import datetime
-import logging
+from datetime import datetime, timedelta
+import os
+import uvicorn
 
 app = FastAPI()
 
-# Konfiguration (du kan ændre disse manuelt 2 gange årligt)
-CHEAPEST_HOURS = 6
-INVERTED = False  # False = tænd de billigste timer, True = sluk de billigste timer
-
-# Fast konfiguration
+# Indstillinger
+NUM_HOURS_ON = 6
+INVERT_OUTPUT = False  # Hvis True: vælg de DYRESTE timer
+LAT = 56.05065
+LON = 10.250527
 SUPPLIER = "dinel_c"
-PRICE_AREA = "DK1"
 
-logging.basicConfig(level=logging.INFO)
+def get_price_data_for_tomorrow():
+    tomorrow = datetime.utcnow().date() + timedelta(days=1)
+    date_str = tomorrow.isoformat()
 
-def hent_data_fra_stromligning():
+    url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER}&lat={LAT}&lon={LON}&date={date_str}"
+    print("Henter data fra:", url)
+
     try:
-        dato = datetime.utcnow().date().isoformat()  # F.eks. "2025-04-14"
-        url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER}&priceArea={PRICE_AREA}&date={dato}"
-        headers = {
-            "User-Agent": "ShellyController/1.0",
-            "Accept": "application/json"
-        }
-
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url)
         response.raise_for_status()
-        logging.info("Svar fra stromligning.dk: %s", response.text)
-        return response.json()
-    except Exception as e:
-        logging.error("Fejl ved hentning af data: %s", str(e))
-        return {"error": f"HTTP-fejl: {str(e)}"}
+        data = response.json()
 
-
-def beregn_timer(data, antal_timer, inverted):
-    try:
-        priser = []
-
-        for entry in data.get("prices", []):
-            # Træk timen ud fra tidspunktet
-            dt = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
-            hour = dt.hour
-            total = entry["price"]["total"]
-            priser.append({
-                "hour": hour,
-                "total": total
-            })
-
-        if len(priser) < antal_timer:
+        if not data.get("prices"):
             return {"error": "Ikke nok prisdata"}
 
-        sorteret = sorted(priser, key=lambda x: x["total"])
-        billigste_timer = [entry["hour"] for entry in sorteret[:antal_timer]]
+        return data["prices"]
 
-        result = [{"hour": h, "on": not inverted} for h in billigste_timer]
-        result += [{"hour": h, "on": inverted} for h in range(24) if h not in billigste_timer]
-        return sorted(result, key=lambda x: x["hour"])
+    except requests.RequestException as e:
+        return {"error": f"HTTP-fejl: {e}"}
     except Exception as e:
-        logging.error("Fejl i beregn_timer: %s", str(e))
-        return {"error": str(e)}
+        return {"error": f"Ukendt fejl: {e}"}
 
-
-@app.get("/tider")
-def get_tider():
+def get_cheapest_hours(prices, num_hours, invert=False):
     try:
-        data = hent_data_fra_stromligning()
-        if "error" in data:
-            return JSONResponse(content=data, status_code=500)
+        hour_prices = []
 
-        result = beregn_timer(data, CHEAPEST_HOURS, INVERTED)
-        if "error" in result:
-            return JSONResponse(content=result, status_code=500)
+        for entry in prices:
+            hour = datetime.fromisoformat(entry["date"]).hour
+            price = entry["price"]["total"]
+            hour_prices.append({"hour": hour, "price": price})
+
+        sorted_hours = sorted(hour_prices, key=lambda x: x["price"], reverse=invert)
+        selected = sorted_hours[:num_hours]
+
+        selected_hours = [item["hour"] for item in selected]
+
+        result = []
+        for hour in range(24):
+            result.append({
+                "hour": hour,
+                "on": hour in selected_hours
+            })
 
         return result
+
     except Exception as e:
-        logging.error("Fejl i get_tider: %s", str(e))
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return {"error": f"Fejl ved sortering: {e}"}
 
+@app.get("/")
+def read_root():
+    prices = get_price_data_for_tomorrow()
+    if isinstance(prices, dict) and "error" in prices:
+        print("Fejl under hentning af priser:", prices["error"])
+        return JSONResponse(status_code=500, content=prices)
 
+    print("Antal prisintervaller hentet:", len(prices))
+    result = get_cheapest_hours(prices, NUM_HOURS_ON, INVERT_OUTPUT)
+
+    if isinstance(result, dict) and "error" in result:
+        print("Fejl i prisbehandling:", result["error"])
+        return JSONResponse(status_code=500, content=result)
+
+    print("Resultat fra prisdata:", result)
+    return result
+
+# Starter server (Render kræver dette)
 if __name__ == "__main__":
-    import uvicorn
-    import os
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)

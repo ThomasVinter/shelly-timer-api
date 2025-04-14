@@ -55,7 +55,7 @@ def beregn_timer(data, antal_timer, inverted):
 
 @app.get("/tider")
 def get_tider():
-    data = hent_data_fra_stromligning(LAT, LON)
+    data = hent_data_fra_stromligning()
     if "error" in data:
         return JSONResponse(content=data, status_code=500)
     result = beregn_timer(data, CHEAPEST_HOURS, INVERTED)

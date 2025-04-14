@@ -18,7 +18,7 @@ def get_price_data_for_tomorrow():
     tomorrow = datetime.utcnow().date() + timedelta(days=1)
     date_str = tomorrow.isoformat()
 
-    url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER}&lat={LAT}&lon={LON}&date={date_str}"
+    url = f"https://stromligning.dk/api/Prices?supplier={SUPPLIER}&priceArea=DK1&date={date_str}"
     print("Henter data fra:", url)
 
     try:

@@ -79,6 +79,15 @@ def read_root():
     print("Resultat fra prisdata:", result)
     return result
 
+@app.get("/raw-prices")
+def get_raw_prices():
+    prices = get_price_data_for_tomorrow()
+    if isinstance(prices, dict) and "error" in prices:
+        return JSONResponse(status_code=500, content=prices)
+
+    return prices  # Returnér rå data fra API'et uden sortering
+
+
 # Starter server (Render kræver dette)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))

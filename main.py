@@ -8,8 +8,6 @@ import os
 app = FastAPI()
 
 # Konfiguration
-LAT = 56.05065
-LON = 10.250527
 SUPPLIER_ID = "dinel_c"
 CHEAPEST_HOURS = 6
 INVERTED = False
@@ -18,14 +16,16 @@ logging.basicConfig(level=logging.INFO)
 
 def hent_data_fra_stromligning():
     try:
+        # Brug i morgen som mål
         i_dag = datetime.now()
         i_morgen = i_dag + timedelta(days=1)
         dato = i_morgen.strftime("%Y-%m-%d")
 
         url = (
             f"https://stromligning.dk/api/Prices"
-            f"?supplier={SUPPLIER_ID}&lat={LAT}&lon={LON}&date={dato}"
+            f"?supplier={SUPPLIER_ID}&date={dato}"
         )
+
         headers = {
             "User-Agent": "ShellyController/1.0",
             "Accept": "application/json"
@@ -76,7 +76,6 @@ def get_tider():
         logging.error("Fejl i get_tider: %s", str(e))
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# Start server når du kører lokalt eller hos Render
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))

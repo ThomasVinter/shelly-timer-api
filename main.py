@@ -16,10 +16,13 @@ INVERTED = False
 
 logging.basicConfig(level=logging.INFO)
 
+from datetime import datetime
+
 def hent_data_fra_stromligning():
     try:
         lat = 56.05065
         lon = 10.250527
+        today = datetime.today().strftime('%Y-%m-%d')
 
         # 1. Find leverandør
         find_url = f"https://stromligning.dk/api/suppliers/find?lat={lat}&long={lon}"
@@ -34,8 +37,8 @@ def hent_data_fra_stromligning():
             return {"error": "Ingen leverandør fundet"}
         supplier_id = leverandorer[0]["id"]
 
-        # 2. Hent priser for den leverandør
-        prices_url = f"https://stromligning.dk/api/Prices?supplier={supplier_id}"
+        # 2. Hent priser for den leverandør og dagsdato
+        prices_url = f"https://stromligning.dk/api/Prices?supplier={supplier_id}&date={today}"
         prices_resp = requests.get(prices_url, headers=headers, timeout=10)
         prices_resp.raise_for_status()
         return prices_resp.json()
@@ -43,7 +46,7 @@ def hent_data_fra_stromligning():
     except Exception as e:
         logging.error("Fejl ved hentning af data: %s", str(e))
         return {"error": f"HTTP-fejl: {str(e)}"}
-
+        
 
 def beregn_timer(data, antal_timer, inverted):
     try:

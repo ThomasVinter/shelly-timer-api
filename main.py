@@ -15,20 +15,12 @@ def get_prices_for_day(date_str):
     response = requests.get(url)
     data = response.json()
 
-    # Hvis det returnerede JSON er pakket ind i en nøgle "data"
-    if isinstance(data, dict) and "data" in data:
-        data = data["data"]
+    if not isinstance(data, dict) or "prices" not in data:
+        raise TypeError(f"Expected dict with 'prices' key, got: {data}")
 
-    # Sikr at data er en liste
-    if not isinstance(data, list):
-        raise TypeError(f"Expected list, got {type(data)}: {data}")
-
+    prices_raw = data["prices"]
     prices = []
-    for entry in data:
-        # Sikr at entry er dict
-        if not isinstance(entry, dict):
-            raise TypeError(f"Entry is not a dict: {entry}")
-
+    for entry in prices_raw:
         timestamp_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
         timestamp_local = timestamp_utc.astimezone(ZoneInfo("Europe/Copenhagen"))
         prices.append({

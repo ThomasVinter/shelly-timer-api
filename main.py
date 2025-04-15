@@ -1,50 +1,71 @@
 from flask import Flask, jsonify
-from datetime import datetime
-from zoneinfo import ZoneInfo
 import requests
+from datetime import datetime, timedelta
+import pytz
 
 app = Flask(__name__)
 
+# --- Parametre du kan ændre ---
 SUPPLIER = "dinel_c"
 PRICE_AREA = "DK1"
-NUMBER_OF_CHEAPEST_HOURS = 20
-INVERT_SELECTION = False
+CHEAPEST_HOURS = 20  # Hvor mange timer per døgn du vil have tændt
+INVERT_OUTPUT = False  # Sæt til True hvis 1 = sluk og 0 = tænd
+# --------------------------------
 
 def get_prices_for_day(date_str):
-    url = f"https://stromligning.dk/api/Prices?priceArea={PRICE_AREA}&supplier={SUPPLIER}&date={date_str}"
-    response = requests.get(url)
-    data = response.json()
-
-    if not isinstance(data, dict) or "prices" not in data:
-        raise TypeError(f"Expected dict with 'prices' key, got: {data}")
-
-    prices_raw = data["prices"]
+    url = f"https://stromligning.dk/api/Prices"
+    params = {
+        "supplier": SUPPLIER,
+        "priceArea": PRICE_AREA,
+        "date": date_str
+    }
+    resp = requests.get(url, params=params)
+    data = resp.json()
+    if isinstance(data, dict) and "prices" in data:
+        prices_raw = data["prices"]
+    else:
+        raise TypeError(f"Expected list, got {type(data)}: {data}")
+    
     prices = []
-    for entry in prices_raw:
-        timestamp_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
-        timestamp_local = timestamp_utc.astimezone(ZoneInfo("Europe/Copenhagen"))
-        prices.append({
-            "hour": timestamp_local.hour,
-            "price": entry["price"]["total"]
-        })
-
+    for item in prices_raw:
+        hour = datetime.fromisoformat(item["date"].replace("Z", "+00:00")).hour
+        total_price = item["price"]["total"]
+        prices.append((hour, total_price))
+    
     return prices
 
-def get_schedule(prices, num_hours=NUMBER_OF_CHEAPEST_HOURS, invert=INVERT_SELECTION):
-    sorted_prices = sorted(prices, key=lambda x: x["price"])
-    cheapest_hours = sorted([p["hour"] for p in sorted_prices[:num_hours]])
+def generate_schedule(prices):
+    # Find grænsepris for X billigste timer
+    sorted_prices = sorted(prices, key=lambda x: x[1])
+    threshold_price = sorted_prices[CHEAPEST_HOURS - 1][1]
 
-    schedule = [1 if hour in cheapest_hours else 0 for hour in range(24)]
-    if invert:
-        schedule = [0 if bit else 1 for bit in schedule]
+    selected_hours = [hour for hour, price in prices if price <= threshold_price]
+
+    schedule = [1 if hour in selected_hours else 0 for hour in range(24)]
+
+    if INVERT_OUTPUT:
+        schedule = [1 - val for val in schedule]
+
     return schedule
 
 @app.route("/")
 def get_today_schedule():
-    today = datetime.now(ZoneInfo("Europe/Copenhagen"))
-    date_str = today.strftime("%Y-%m-%d")
+    # Brug dansk tid
+    danish_tz = pytz.timezone("Europe/Copenhagen")
+    today = datetime.now(danish_tz).date()
+    
+    # Hvis klokken er efter 14, brug næste dag
+    now = datetime.now(danish_tz)
+    if now.hour >= 14:
+        target_date = today + timedelta(days=1)
+    else:
+        target_date = today
+
+    date_str = target_date.strftime("%Y-%m-%d")
+
     prices = get_prices_for_day(date_str)
-    schedule = get_schedule(prices)
+    schedule = generate_schedule(prices)
+
     return jsonify(schedule)
 
 if __name__ == "__main__":

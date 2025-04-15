@@ -8,12 +8,12 @@ app = Flask(__name__)
 # --- Parametre du kan ændre ---
 SUPPLIER = "dinel_c"
 PRICE_AREA = "DK1"
-CHEAPEST_HOURS = 20  # Hvor mange timer per døgn du vil have tændt
+CHEAPEST_HOURS = 20  # Antal ønskede "1" i resultatet
 INVERT_OUTPUT = False  # Sæt til True hvis 1 = sluk og 0 = tænd
 # --------------------------------
 
 def get_prices_for_day(date_str):
-    url = f"https://stromligning.dk/api/Prices"
+    url = "https://stromligning.dk/api/Prices"
     params = {
         "supplier": SUPPLIER,
         "priceArea": PRICE_AREA,
@@ -21,25 +21,25 @@ def get_prices_for_day(date_str):
     }
     resp = requests.get(url, params=params)
     data = resp.json()
+
     if isinstance(data, dict) and "prices" in data:
         prices_raw = data["prices"]
     else:
-        raise TypeError(f"Expected list, got {type(data)}: {data}")
-    
+        raise TypeError(f"Expected dict with 'prices', got {data}")
+
     prices = []
     for item in prices_raw:
-        hour = datetime.fromisoformat(item["date"].replace("Z", "+00:00")).hour
-        total_price = item["price"]["total"]
-        prices.append((hour, total_price))
-    
+        dt = datetime.fromisoformat(item["date"].replace("Z", "+00:00"))
+        hour = dt.hour
+        price = item["price"]["total"]
+        prices.append((hour, price))
+
     return prices
 
 def generate_schedule(prices):
-    # Find grænsepris for X billigste timer
+    # Sortér på pris og vælg præcis X timer
     sorted_prices = sorted(prices, key=lambda x: x[1])
-    threshold_price = sorted_prices[CHEAPEST_HOURS - 1][1]
-
-    selected_hours = [hour for hour, price in prices if price <= threshold_price]
+    selected_hours = set(hour for hour, _ in sorted_prices[:CHEAPEST_HOURS])
 
     schedule = [1 if hour in selected_hours else 0 for hour in range(24)]
 
@@ -49,23 +49,18 @@ def generate_schedule(prices):
     return schedule
 
 @app.route("/")
-def get_today_schedule():
-    # Brug dansk tid
+def get_schedule():
     danish_tz = pytz.timezone("Europe/Copenhagen")
-    today = datetime.now(danish_tz).date()
-    
-    # Hvis klokken er efter 14, brug næste dag
     now = datetime.now(danish_tz)
+
+    # Brug næste dag hvis klokken er efter 14
+    target_date = now.date()
     if now.hour >= 14:
-        target_date = today + timedelta(days=1)
-    else:
-        target_date = today
+        target_date += timedelta(days=1)
 
     date_str = target_date.strftime("%Y-%m-%d")
-
     prices = get_prices_for_day(date_str)
     schedule = generate_schedule(prices)
-
     return jsonify(schedule)
 
 if __name__ == "__main__":

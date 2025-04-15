@@ -15,9 +15,11 @@ def get_prices_for_day(date_str):
     response = requests.get(url)
     data = response.json()
 
+    print("RAW DATA:", data)  # <-- TILFØJET
+
     prices = []
     for entry in data:
-        # Konverter tidspunkt fra UTC til lokal dansk tid (inkl. sommer/vintertid)
+        print("ENTRY:", entry)  # <-- TILFØJET
         timestamp_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
         timestamp_local = timestamp_utc.astimezone(ZoneInfo("Europe/Copenhagen"))
         prices.append({

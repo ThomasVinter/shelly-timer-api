@@ -15,16 +15,17 @@ def get_prices_for_day(date_str):
     response = requests.get(url)
     data = response.json()
 
-    print("RAW DATA:", data)  # <-- TILFØJET
+    # Hvis det returnerede JSON er pakket ind i en top-nøgle, f.eks. "data": [...]
+    if isinstance(data, dict) and "data" in data:
+        data = data["data"]
 
     prices = []
     for entry in data:
-        print("ENTRY:", entry)  # <-- TILFØJET
         timestamp_utc = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
         timestamp_local = timestamp_utc.astimezone(ZoneInfo("Europe/Copenhagen"))
         prices.append({
             "hour": timestamp_local.hour,
-            "price": entry["total"]
+            "price": entry["price"]["total"]
         })
     return prices
 

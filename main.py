@@ -37,7 +37,9 @@ def fetch_prices_for_today():
     print(response.text)
 
     try:
-        all_data = response.json()
+        json_response = response.json()
+        all_data = json_response["prices"]
+
         print(f"Modtog {len(all_data)} poster fra API’et")
         for entry in all_data:
             print(entry["date"])

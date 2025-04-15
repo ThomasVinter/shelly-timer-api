@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 SUPPLIER = "dinel_c"
 PRICE_AREA = "DK1"
-NUMBER_OF_CHEAPEST_HOURS = 6
+NUMBER_OF_CHEAPEST_HOURS = 20
 INVERT_SELECTION = False
 
 def get_prices_for_day(date_str):

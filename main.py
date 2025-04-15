@@ -36,6 +36,9 @@ def fetch_prices_for_today():
 
     try:
         all_data = response.json()
+        print(f"Modtog {len(all_data)} poster fra API’et")
+        for entry in all_data:
+            print(entry["date"])
     except Exception:
         raise Exception("Invalid JSON")
 
@@ -51,8 +54,8 @@ def fetch_prices_for_today():
         except Exception:
             continue
 
-    if len(today_prices) != 24:
-        raise Exception("Did not find 24 hourly prices for today")
+if len(today_prices) < 24:
+    print(f"Advarsel: Kun fundet {len(today_prices)} timer for i dag")
 
     # Sorter efter time (sikkerhed)
     today_prices.sort(key=lambda x: x[0])

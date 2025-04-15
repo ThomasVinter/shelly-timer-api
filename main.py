@@ -54,8 +54,8 @@ def fetch_prices_for_today():
         except Exception:
             continue
 
-if len(today_prices) < 24:
-    print(f"Advarsel: Kun fundet {len(today_prices)} timer for i dag")
+    if len(today_prices) != 24:
+        raise Exception("Did not find 24 hourly prices for today")
 
     # Sorter efter time (sikkerhed)
     today_prices.sort(key=lambda x: x[0])
@@ -63,7 +63,8 @@ if len(today_prices) < 24:
     # Cache
     cached_prices = today_prices
     cached_date = today
-    return today_prices
+
+    return today_prices  # <-- DENNE SKAL VÆRE INDENFOR FUNKTIONEN
 
 @app.route("/")
 def cheapest_hours():

@@ -1,72 +1,64 @@
-from flask import Flask, jsonify
+from flask import Flask, request, jsonify
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 app = Flask(__name__)
 
-# --- Parametre du kan ændre ---
-SUPPLIER = "dinel_c"
-PRICE_AREA = "DK1"
-CHEAPEST_HOURS = 20  # Antal ønskede "1" i resultatet
-INVERT_OUTPUT = False  # Sæt til True hvis 1 = sluk og 0 = tænd
-# --------------------------------
+cached_prices = None
+cached_date = None
 
-def get_prices_for_day(date_str):
-    url = "https://stromligning.dk/api/Prices"
-    params = {
-        "supplier": SUPPLIER,
-        "priceArea": PRICE_AREA,
+dk_tz = pytz.timezone("Europe/Copenhagen")
+
+def fetch_prices():
+    date_str = datetime.now(dk_tz).strftime("%Y-%m-%d")
+    r = requests.get("https://stromligning.dk/api/Prices", params={
+        "supplier": "dinel_c",
+        "priceArea": "DK1",
         "date": date_str
-    }
-    resp = requests.get(url, params=params)
-    data = resp.json()
-
-    if isinstance(data, dict) and "prices" in data:
-        prices_raw = data["prices"]
-    else:
-        raise TypeError(f"Expected dict with 'prices', got {data}")
-
-    prices = []
-    for item in prices_raw:
-        dt = datetime.fromisoformat(item["date"].replace("Z", "+00:00"))
-        hour = dt.hour
-        price = item["price"]["total"]
-        prices.append((hour, price))
-
-    return prices
-
-def generate_schedule(prices):
-    # Sortér på pris og tag præcis X timer
-    sorted_prices = sorted(prices, key=lambda x: x[1])
-    selected_hours = set()
-
-    for hour, price in sorted_prices:
-        selected_hours.add(hour)
-        if len(selected_hours) == CHEAPEST_HOURS:
-            break
-
-    schedule = [1 if hour in selected_hours else 0 for hour in range(24)]
-
-    if INVERT_OUTPUT:
-        schedule = [1 - val for val in schedule]
-
-    return schedule
+    })
+    r.raise_for_status()
+    data = r.json()
+    prices = sorted((e for e in data if 0 <= e["hour"] < 24), key=lambda x: x["hour"])
+    return datetime.now(dk_tz).date(), [p["value"] for p in prices]
 
 @app.route("/")
-def get_schedule():
-    danish_tz = pytz.timezone("Europe/Copenhagen")
-    now = datetime.now(danish_tz)
+def cheapest_hours():
+    global cached_prices, cached_date
+    today = datetime.now(dk_tz).date()
 
-    # Brug næste dag hvis klokken er efter 14
-    target_date = now.date()
-    if now.hour >= 14:
-        target_date += timedelta(days=1)
+    if cached_prices is None or cached_date != today:
+        try:
+            cached_date, cached_prices = fetch_prices()
+        except Exception as e:
+            return jsonify({"error": "Failed to fetch prices", "details": str(e)}), 500
 
-    date_str = target_date.strftime("%Y-%m-%d")
-    prices = get_prices_for_day(date_str)
-    schedule = generate_schedule(prices)
-    return jsonify(schedule)
+    try:
+        hours = int(request.args.get("hours", "8"))
+        if not 0 <= hours <= 24:
+            raise ValueError()
+    except ValueError:
+        return jsonify({"error": "Invalid 'hours' parameter"}), 400
+
+    indexed = list(enumerate(cached_prices))
+    indexed.sort(key=lambda x: x[1])
+    cheapest = set(i for i, _ in indexed[:hours])
+
+    return jsonify([0 if i in cheapest else 1 for i in range(24)])
+
+@app.route("/raw-prices")
+def raw_prices():
+    global cached_prices, cached_date
+    if cached_prices is None or cached_date != datetime.now(dk_tz).date():
+        try:
+            cached_date, cached_prices = fetch_prices()
+        except Exception as e:
+            return jsonify({"error": "Failed to fetch prices", "details": str(e)}), 500
+
+    return jsonify({
+        "date": cached_date.isoformat(),
+        "prices": cached_prices
+    })
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0")

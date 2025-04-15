@@ -79,3 +79,7 @@ def cheapest_hours():
 
     except Exception as e:
         return jsonify({"error": "Failed to fetch prices", "details": str(e)}), 500
+
+# 🚀 Dette starter Flask-serveren (mangler ofte i mange eksempler)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

@@ -37,9 +37,14 @@ def get_prices_for_day(date_str):
     return prices
 
 def generate_schedule(prices):
-    # Sortér på pris og vælg præcis X timer
+    # Sortér på pris og tag præcis X timer
     sorted_prices = sorted(prices, key=lambda x: x[1])
-    selected_hours = set(hour for hour, _ in sorted_prices[:CHEAPEST_HOURS])
+    selected_hours = set()
+
+    for hour, price in sorted_prices:
+        selected_hours.add(hour)
+        if len(selected_hours) == CHEAPEST_HOURS:
+            break
 
     schedule = [1 if hour in selected_hours else 0 for hour in range(24)]
 

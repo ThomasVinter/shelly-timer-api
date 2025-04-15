@@ -73,7 +73,7 @@ def fetch_prices_for_today():
 @app.route("/")
 def cheapest_hours():
     try:
-        num_hours = int(request.args.get("hours", 6))
+        num_hours = int(request.args.get("hours", 4))
         prices = fetch_prices_for_today()
 
         # Sorter efter pris og vælg de billigste N timer

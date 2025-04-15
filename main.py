@@ -33,6 +33,8 @@ def fetch_prices_for_today():
 
     if response.status_code != 200:
         raise Exception("API request failed")
+    print("Rå API-svar:")
+    print(response.text)
 
     try:
         all_data = response.json()

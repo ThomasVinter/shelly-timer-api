@@ -18,9 +18,15 @@ def fetch_prices():
         "date": date_str
     })
     r.raise_for_status()
-    data = r.json()
+    full_data = r.json()
+
+    # Forventet struktur: {"data": [ ... ]}
+    data = full_data["data"]
+
+    # Sorter på time og returnér kun første 24 timer
     prices = sorted((e for e in data if 0 <= e["hour"] < 24), key=lambda x: x["hour"])
     return datetime.now(dk_tz).date(), [p["value"] for p in prices]
+
 
 @app.route("/")
 def cheapest_hours():

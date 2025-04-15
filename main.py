@@ -6,71 +6,76 @@ import pytz
 app = Flask(__name__)
 
 # Fast opsætning
-API_URL = "https://stromligning.dk/api/Prices"
 SUPPLIER = "dinel_c"
 PRICE_AREA = "DK1"
+API_URL = "https://stromligning.dk/api/Prices"
+TIMEZONE = pytz.timezone("Europe/Copenhagen")
 
-# Intern cache
-cached_prices = None
+# Cache
+cached_prices = []
 cached_date = None
 
-# Hjælpefunktion til at hente priser for i dag i lokal tid (Danmark)
-def fetch_today_prices():
+def fetch_prices_for_today():
     global cached_prices, cached_date
 
-    # Dansk tid
-    danish_tz = pytz.timezone("Europe/Copenhagen")
-    now = datetime.now(danish_tz)
-    today_date = now.strftime("%Y-%m-%d")
+    now = datetime.now(TIMEZONE)
+    today = now.date()
 
-    # Hvis vi allerede har hentet for i dag, genbrug data
-    if cached_date == today_date and cached_prices:
+    if cached_date == today and cached_prices:
         return cached_prices
 
-    # Kald API
+    # Hent data fra API
     response = requests.get(API_URL, params={
         "supplier": SUPPLIER,
         "priceArea": PRICE_AREA,
-        "date": today_date
+        "date": today.isoformat()
     })
 
     if response.status_code != 200:
-        raise Exception("Failed to fetch data")
+        raise Exception("API request failed")
 
-    data = response.json()
-    if not isinstance(data, list):
-        raise Exception("Unexpected response format")
-
-    # Filtrér kun de 24 timer for i dag
-    prices = []
-    for entry in data:
-        timestamp = datetime.fromisoformat(entry['date'].replace("Z", "+00:00")).astimezone(danish_tz)
-        if timestamp.date() == now.date():
-            prices.append((timestamp.hour, entry['price']['total']))
-
-    # Gem til cache
-    cached_prices = prices
-    cached_date = today_date
-
-    return prices
-
-# Webroute: /?hours=4
-@app.route("/")
-def get_cheapest_hours():
     try:
-        hours = int(request.args.get("hours", 4))
-        prices = fetch_today_prices()
+        all_data = response.json()
+    except Exception:
+        raise Exception("Invalid JSON")
 
-        # Sortér priser og tag de X billigste
+    # Filtrer præcis de 24 timer for dags dato (kl. 00:00–23:00 dansk tid)
+    today_prices = []
+    for entry in all_data:
+        try:
+            timestamp = datetime.fromisoformat(entry["date"].replace("Z", "+00:00")).astimezone(TIMEZONE)
+            if timestamp.date() == today:
+                total_price = entry["price"]["total"]
+                hour = timestamp.hour
+                today_prices.append((hour, total_price))
+        except Exception:
+            continue
+
+    if len(today_prices) != 24:
+        raise Exception("Did not find 24 hourly prices for today")
+
+    # Sorter efter time (sikkerhed)
+    today_prices.sort(key=lambda x: x[0])
+
+    # Cache
+    cached_prices = today_prices
+    cached_date = today
+    return today_prices
+
+@app.route("/")
+def cheapest_hours():
+    try:
+        num_hours = int(request.args.get("hours", 6))
+        prices = fetch_prices_for_today()
+
+        # Sorter efter pris og vælg de billigste N timer
         sorted_prices = sorted(prices, key=lambda x: x[1])
-        cheapest_hours = set([hour for hour, _ in sorted_prices[:hours]])
+        cheapest_hours_set = set([hour for hour, _ in sorted_prices[:num_hours]])
 
-        # Lav output-array: 0 hvis billig, ellers 1
-        output = [0 if hour in cheapest_hours else 1 for hour in range(24)]
-        return jsonify(output)
+        # Lav en liste med 0 for billig time, 1 for dyr
+        result = [0 if hour in cheapest_hours_set else 1 for hour, _ in prices]
+
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({"error": "Failed to fetch prices", "details": str(e)}), 500
-
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0")

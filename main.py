@@ -1,70 +1,76 @@
 from flask import Flask, request, jsonify
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 app = Flask(__name__)
 
+# Fast opsætning
+API_URL = "https://stromligning.dk/api/Prices"
+SUPPLIER = "dinel_c"
+PRICE_AREA = "DK1"
+
+# Intern cache
 cached_prices = None
 cached_date = None
 
-dk_tz = pytz.timezone("Europe/Copenhagen")
+# Hjælpefunktion til at hente priser for i dag i lokal tid (Danmark)
+def fetch_today_prices():
+    global cached_prices, cached_date
 
-def fetch_prices():
-    date_str = datetime.now(dk_tz).strftime("%Y-%m-%d")
-    r = requests.get("https://stromligning.dk/api/Prices", params={
-        "supplier": "dinel_c",
-        "priceArea": "DK1",
-        "date": date_str
+    # Dansk tid
+    danish_tz = pytz.timezone("Europe/Copenhagen")
+    now = datetime.now(danish_tz)
+    today_date = now.strftime("%Y-%m-%d")
+
+    # Hvis vi allerede har hentet for i dag, genbrug data
+    if cached_date == today_date and cached_prices:
+        return cached_prices
+
+    # Kald API
+    response = requests.get(API_URL, params={
+        "supplier": SUPPLIER,
+        "priceArea": PRICE_AREA,
+        "date": today_date
     })
-    r.raise_for_status()
-    full_data = r.json()
 
-    # Forventet struktur: {"data": [ ... ]}
-    data = full_data["data"]
+    if response.status_code != 200:
+        raise Exception("Failed to fetch data")
 
-    # Sorter på time og returnér kun første 24 timer
-    prices = sorted((e for e in data if 0 <= e["hour"] < 24), key=lambda x: x["hour"])
-    return datetime.now(dk_tz).date(), [p["value"] for p in prices]
+    data = response.json()
+    if not isinstance(data, list):
+        raise Exception("Unexpected response format")
 
+    # Filtrér kun de 24 timer for i dag
+    prices = []
+    for entry in data:
+        timestamp = datetime.fromisoformat(entry['date'].replace("Z", "+00:00")).astimezone(danish_tz)
+        if timestamp.date() == now.date():
+            prices.append((timestamp.hour, entry['price']['total']))
 
+    # Gem til cache
+    cached_prices = prices
+    cached_date = today_date
+
+    return prices
+
+# Webroute: /?hours=4
 @app.route("/")
-def cheapest_hours():
-    global cached_prices, cached_date
-    today = datetime.now(dk_tz).date()
-
-    if cached_prices is None or cached_date != today:
-        try:
-            cached_date, cached_prices = fetch_prices()
-        except Exception as e:
-            return jsonify({"error": "Failed to fetch prices", "details": str(e)}), 500
-
+def get_cheapest_hours():
     try:
-        hours = int(request.args.get("hours", "8"))
-        if not 0 <= hours <= 24:
-            raise ValueError()
-    except ValueError:
-        return jsonify({"error": "Invalid 'hours' parameter"}), 400
+        hours = int(request.args.get("hours", 4))
+        prices = fetch_today_prices()
 
-    indexed = list(enumerate(cached_prices))
-    indexed.sort(key=lambda x: x[1])
-    cheapest = set(i for i, _ in indexed[:hours])
+        # Sortér priser og tag de X billigste
+        sorted_prices = sorted(prices, key=lambda x: x[1])
+        cheapest_hours = set([hour for hour, _ in sorted_prices[:hours]])
 
-    return jsonify([0 if i in cheapest else 1 for i in range(24)])
+        # Lav output-array: 0 hvis billig, ellers 1
+        output = [0 if hour in cheapest_hours else 1 for hour in range(24)]
+        return jsonify(output)
 
-@app.route("/raw-prices")
-def raw_prices():
-    global cached_prices, cached_date
-    if cached_prices is None or cached_date != datetime.now(dk_tz).date():
-        try:
-            cached_date, cached_prices = fetch_prices()
-        except Exception as e:
-            return jsonify({"error": "Failed to fetch prices", "details": str(e)}), 500
-
-    return jsonify({
-        "date": cached_date.isoformat(),
-        "prices": cached_prices
-    })
+    except Exception as e:
+        return jsonify({"error": "Failed to fetch prices", "details": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0")
